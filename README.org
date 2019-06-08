@@ -1,0 +1,4 @@
+* Resources
+** Advanced map shading tutorial
+   [[https://wwwtyro.net/2019/03/21/advanced-map-shading.html][tutorial link]]
+
