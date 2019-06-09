@@ -1,4 +1,7 @@
 * Resources
 ** Advanced map shading tutorial
    [[https://wwwtyro.net/2019/03/21/advanced-map-shading.html][tutorial link]]
-
+** Mapbox streets v8 documentation
+   [[https://docs.mapbox.com/vector-tiles/reference/mapbox-streets-v8/][online docs]]
+** Vector tile utilities
+   [[https://github.com/mapbox/awesome-vector-tiles/][github repo]]

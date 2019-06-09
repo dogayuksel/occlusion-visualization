@@ -41,6 +41,11 @@ const MAPBOX_STREETS = 'https://api.mapbox.com/v4/mapbox.mapbox-streets-v8';
 const MAPBOX_SATELLITE = 'https://api.mapbox.com/v4/mapbox.satellite';
 
 const EXTEND = 4096;
+const TOWER_HEIGHT = 368;
+
+const normalizeX = (value) => (value / EXTEND - 0.5) * 2;
+const normalizeY = (value) => (value / EXTEND - 0.5) * -2;
+const normalizeHeight = (value) => value / (TOWER_HEIGHT + 100);
 
 const main = async () => {
   const vectorData = await fetch(
@@ -59,8 +64,6 @@ const main = async () => {
   let maxY = -EXTEND;
   let maxHeight = 0;
 
-  const TOWER_HEIGHT = 368;
-
   const polygonFromGeometry = (points) => points
         .slice(0, -1)
         .map(p => [p.x, p.y]);
@@ -72,8 +75,10 @@ const main = async () => {
   for (let featureIndex = 0; featureIndex < tile.layers.building.length; featureIndex++) {
     const building = tile.layers.building.feature(featureIndex);
     const buildingHeight = building.properties.height;
+    const minHeight = building.properties['min_height'];
+    const extrude = building.properties.extrude;
     const polygons = building.loadGeometry();
-    if (buildingHeight) {
+    if (extrude) {
       buildings.push(building);
       if (buildingHeight > maxHeight && buildingHeight != TOWER_HEIGHT) {
         maxHeight = buildingHeight;
@@ -87,19 +92,49 @@ const main = async () => {
           if (y > maxY) { maxY = y; }
           if (y < minY) { minY = y; }
         }
-        // console.log(pointArrays[pointIndex]);
-        // console.log(pointArrays);
+
+        for (let edgeIndex = 0; edgeIndex < polygon.length - 1; edgeIndex += 1) {
+          triangles.push(normalizeX(polygon[edgeIndex].x));
+          triangles.push(normalizeY(polygon[edgeIndex].y));
+          triangles.push(normalizeHeight(buildingHeight));
+          triangles.push(normalizeX(polygon[edgeIndex + 1].x));
+          triangles.push(normalizeY(polygon[edgeIndex + 1].y));
+          triangles.push(normalizeHeight(buildingHeight));
+          triangles.push(normalizeX(polygon[edgeIndex].x));
+          triangles.push(normalizeY(polygon[edgeIndex].y));
+          triangles.push(normalizeHeight(minHeight));
+
+          triangles.push(normalizeX(polygon[edgeIndex].x));
+          triangles.push(normalizeY(polygon[edgeIndex].y));
+          triangles.push(normalizeHeight(minHeight));
+          triangles.push(normalizeX(polygon[edgeIndex + 1].x));
+          triangles.push(normalizeY(polygon[edgeIndex + 1].y));
+          triangles.push(normalizeHeight(buildingHeight));
+          triangles.push(normalizeX(polygon[edgeIndex + 1].x));
+          triangles.push(normalizeY(polygon[edgeIndex + 1].y));
+          triangles.push(normalizeHeight(minHeight));
+        };
 
         const triangleEdges = earcut(earcutFromGeometry(polygon));
         for (let triangleIndex = 0; triangleIndex < triangleEdges.length; triangleIndex++) {
           const edge = polygon[triangleEdges[triangleIndex]];
-          triangles.push((edge.x / EXTEND - 0.5) * 2);
-          triangles.push((edge.y / EXTEND - 0.5) * -2);
-          triangles.push(buildingHeight / (TOWER_HEIGHT + 1));
+          triangles.push(normalizeX(edge.x));
+          triangles.push(normalizeY(edge.y));
+          triangles.push(normalizeHeight(buildingHeight));
         }
       }
     }
   }
+
+  const angleInRadians = -0.3;
+  const c = Math.cos(angleInRadians);
+  const s = Math.sin(angleInRadians);
+  const rotationMatrix = [
+    1, 0, 0, 0,
+    0, c, s, 0,
+    0, -s, c, 0,
+    0, 0, 0, 1,
+  ];
 
   console.log("maxX", maxX);
   console.log('minX', minX);
@@ -127,9 +162,10 @@ const main = async () => {
     vert: `
       precision highp float;
       attribute vec3 position;
+      uniform mat4 u_rMatrix;
 
       void main() {
-        gl_Position = vec4(position, 1);
+        gl_Position = u_rMatrix * vec4(position, 1);
       }
     `,
     frag: `
@@ -161,7 +197,8 @@ const main = async () => {
     count: triangles.length / 9,
     uniforms: {
       u_tSatellite: u_tSatellite,
-      u_resolution: [satelliteImage.width, satelliteImage.height]
+      u_resolution: [satelliteImage.width, satelliteImage.height],
+      u_rMatrix: rotationMatrix,
     },
     viewport: { x: 0, y: 0, width: satelliteImage.width, height: satelliteImage.height },
   });
