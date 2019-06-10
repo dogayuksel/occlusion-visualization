@@ -45,7 +45,7 @@ const TOWER_HEIGHT = 368;
 
 const normalizeX = (value) => (value / EXTEND - 0.5) * 2;
 const normalizeY = (value) => (value / EXTEND - 0.5) * -2;
-const normalizeHeight = (value) => value / (TOWER_HEIGHT + 100);
+const normalizeHeight = (value) => value / (TOWER_HEIGHT * 2);
 
 const main = async () => {
   const vectorData = await fetch(
@@ -57,16 +57,13 @@ const main = async () => {
 
   const buildings = [];
   const triangles = [];
+  const colors = [];
 
   let minX = EXTEND;
   let maxX = -EXTEND;
   let minY = EXTEND;
   let maxY = -EXTEND;
   let maxHeight = 0;
-
-  const polygonFromGeometry = (points) => points
-        .slice(0, -1)
-        .map(p => [p.x, p.y]);
 
   const earcutFromGeometry = (points) => points
         .slice(0, -1)
@@ -78,7 +75,8 @@ const main = async () => {
     const minHeight = building.properties['min_height'];
     const extrude = building.properties.extrude;
     const polygons = building.loadGeometry();
-    if (extrude) {
+
+    if (extrude === 'true') {
       buildings.push(building);
       if (buildingHeight > maxHeight && buildingHeight != TOWER_HEIGHT) {
         maxHeight = buildingHeight;
@@ -94,39 +92,60 @@ const main = async () => {
         }
 
         for (let edgeIndex = 0; edgeIndex < polygon.length - 1; edgeIndex += 1) {
-          triangles.push(normalizeX(polygon[edgeIndex].x));
-          triangles.push(normalizeY(polygon[edgeIndex].y));
-          triangles.push(normalizeHeight(buildingHeight));
-          triangles.push(normalizeX(polygon[edgeIndex + 1].x));
-          triangles.push(normalizeY(polygon[edgeIndex + 1].y));
-          triangles.push(normalizeHeight(buildingHeight));
-          triangles.push(normalizeX(polygon[edgeIndex].x));
-          triangles.push(normalizeY(polygon[edgeIndex].y));
-          triangles.push(normalizeHeight(minHeight));
+          triangles.push(
+            normalizeX(polygon[edgeIndex].x),
+            normalizeY(polygon[edgeIndex].y),
+            normalizeHeight(buildingHeight),
+          );
+          colors.push(0.1, 0.7, 0.21);
+          triangles.push(
+            normalizeX(polygon[edgeIndex + 1].x),
+            normalizeY(polygon[edgeIndex + 1].y),
+            normalizeHeight(buildingHeight),
+          );
+          colors.push(0.1, 0.7, 0.21);
+          triangles.push(
+            normalizeX(polygon[edgeIndex].x),
+            normalizeY(polygon[edgeIndex].y),
+            normalizeHeight(minHeight),
+          );
+          colors.push(0.1, 0.7, 0.21);
 
-          triangles.push(normalizeX(polygon[edgeIndex].x));
-          triangles.push(normalizeY(polygon[edgeIndex].y));
-          triangles.push(normalizeHeight(minHeight));
-          triangles.push(normalizeX(polygon[edgeIndex + 1].x));
-          triangles.push(normalizeY(polygon[edgeIndex + 1].y));
-          triangles.push(normalizeHeight(buildingHeight));
-          triangles.push(normalizeX(polygon[edgeIndex + 1].x));
-          triangles.push(normalizeY(polygon[edgeIndex + 1].y));
-          triangles.push(normalizeHeight(minHeight));
+          triangles.push(
+            normalizeX(polygon[edgeIndex].x),
+            normalizeY(polygon[edgeIndex].y),
+            normalizeHeight(minHeight),
+          );
+          colors.push(0.1, 0.7, 0.21);
+          triangles.push(
+            normalizeX(polygon[edgeIndex + 1].x),
+            normalizeY(polygon[edgeIndex + 1].y),
+            normalizeHeight(buildingHeight)
+          );
+          colors.push(0.1, 0.7, 0.21);
+          triangles.push(
+            normalizeX(polygon[edgeIndex + 1].x),
+            normalizeY(polygon[edgeIndex + 1].y),
+            normalizeHeight(minHeight),
+          );
+          colors.push(0.1, 0.7, 0.21);
         };
 
         const triangleEdges = earcut(earcutFromGeometry(polygon));
-        for (let triangleIndex = 0; triangleIndex < triangleEdges.length; triangleIndex++) {
-          const edge = polygon[triangleEdges[triangleIndex]];
-          triangles.push(normalizeX(edge.x));
-          triangles.push(normalizeY(edge.y));
-          triangles.push(normalizeHeight(buildingHeight));
+        for (let tIndex = triangleEdges.length - 1; tIndex >= 0; tIndex -= 1) {
+          const edge = polygon[triangleEdges[tIndex]];
+          triangles.push(
+            normalizeX(edge.x),
+            normalizeY(edge.y),
+            normalizeHeight(buildingHeight),
+          );
+          colors.push(0.7, 0.18, 0.21);
         }
       }
     }
   }
 
-  const angleInRadians = -0.3;
+  const angleInRadians = -0.6;
   const c = Math.cos(angleInRadians);
   const s = Math.sin(angleInRadians);
   const rotationMatrix = [
@@ -159,13 +178,20 @@ const main = async () => {
   });
 
   const cmdProcessElevation = reglInstance({
+    cull: {
+      enable: true,
+    },
     vert: `
       precision highp float;
-      attribute vec3 position;
+      attribute vec3 a_position;
+      attribute vec3 a_color;
+
       uniform mat4 u_rMatrix;
+      varying vec4 v_color;
 
       void main() {
-        gl_Position = u_rMatrix * vec4(position, 1);
+        gl_Position = u_rMatrix * vec4(a_position, 1.0);
+        v_color = vec4(a_color, 1.0);
       }
     `,
     frag: `
@@ -173,6 +199,8 @@ const main = async () => {
 
       uniform sampler2D u_tSatellite;
       uniform vec2 u_resolution;
+
+      varying vec4 v_color;
 
       float plot(vec2 st, float pct){
         return smoothstep( pct-0.02, pct, st.y) -
@@ -188,11 +216,12 @@ const main = async () => {
         float pct = plot(st, y);
         vec4 newColor = vec4((1.0 - pct) * color + pct * vec3(0.0, 0.7, 0.0), 1.0);
         vec4 mixed = mix(newColor, texture2D(u_tSatellite, st), 0.7);
-        gl_FragColor = mixed;
+        gl_FragColor = v_color;
       }
     `,
     attributes: {
-      position: triangles,
+      a_position: triangles,
+      a_color: colors,
     },
     count: triangles.length / 9,
     uniforms: {
